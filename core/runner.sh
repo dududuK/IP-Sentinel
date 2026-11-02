@@ -47,6 +47,50 @@ export -f log
 export CONFIG_FILE INSTALL_DIR
 
 # ==========================================================
+# [防线 1.5] 目标时区生物钟门禁 (Circadian Rhythm Gate)
+# 模拟目标区域人类生理作息，深夜时段静默休眠
+# ==========================================================
+TARGET_TZ="UTC"
+CC="${REGION_CODE%%-*}"
+CC=$(echo "$CC" | tr 'a-z' 'A-Z')
+case "$CC" in
+    "US")
+        case "$REGION_CODE" in
+            "US-CA"|"US-WA"|"US-OR"|"US-NV") TARGET_TZ="America/Los_Angeles" ;;
+            "US-IL"|"US-TX"|"US-MO")         TARGET_TZ="America/Chicago" ;;
+            *)                                TARGET_TZ="America/New_York" ;;
+        esac
+        ;;
+    "JP") TARGET_TZ="Asia/Tokyo" ;;
+    "HK") TARGET_TZ="Asia/Hong_Kong" ;;
+    "TW") TARGET_TZ="Asia/Taipei" ;;
+    "SG") TARGET_TZ="Asia/Singapore" ;;
+    "DE") TARGET_TZ="Europe/Berlin" ;;
+    "UK"|"GB") TARGET_TZ="Europe/London" ;;
+    "FR") TARGET_TZ="Europe/Paris" ;;
+    "NL") TARGET_TZ="Europe/Amsterdam" ;;
+    "KR") TARGET_TZ="Asia/Seoul" ;;
+    "AU") TARGET_TZ="Australia/Sydney" ;;
+    "CA") TARGET_TZ="America/Toronto" ;;
+    "IN") TARGET_TZ="Asia/Kolkata" ;;
+    "MY") TARGET_TZ="Asia/Kuala_Lumpur" ;;
+    "TH") TARGET_TZ="Asia/Bangkok" ;;
+    "VN") TARGET_TZ="Asia/Ho_Chi_Minh" ;;
+    "PH") TARGET_TZ="Asia/Manila" ;;
+    "ID") TARGET_TZ="Asia/Jakarta" ;;
+    "BR") TARGET_TZ="America/Sao_Paulo" ;;
+    "MX") TARGET_TZ="America/Mexico_City" ;;
+    *)    TARGET_TZ="UTC" ;;
+esac
+
+LOCAL_HOUR=$(TZ="$TARGET_TZ" date +%H 2>/dev/null || date -u +%H)
+HOUR_VAL=$((10#$LOCAL_HOUR))
+if [ "$HOUR_VAL" -ge 0 ] && [ "$HOUR_VAL" -le 6 ]; then
+    log "SYSTEM" "INFO " "🌙 当前目标战区为深夜作息时段 (${LOCAL_HOUR}:00)，模拟人类睡眠，跳过本轮执行。"
+    exit 0
+fi
+
+# ==========================================================
 # [防线 2] 行为学隐蔽 (Cron Jitter)
 # 彻底消除僵尸网络同频定时唤醒特征，自然打散全球并发请求
 # ==========================================================
@@ -66,26 +110,39 @@ log "SYSTEM" "INFO" "休眠结束，开始计算本轮任务轮盘..."
 TARGET_MOD=""
 MOD_NAME=""
 
-# 概率任务分配模型
-if [ "$ENABLE_GOOGLE" == "true" ] && [ "$ENABLE_TRUST" == "true" ]; then
-    # 优先锚定地理画像，辅助洗刷风控分
+# [稳定态判定: 达标即静默]
+SETTLED_FILE="${INSTALL_DIR}/core/.geo_settled"
+if [ -f "$SETTLED_FILE" ] || [ -f "/opt/ip_sentinel/core/.geo_settled" ]; then
     ROLL=$((RANDOM % 100 + 1))
-    if [ $ROLL -le 70 ]; then
-        TARGET_MOD="mod_google.sh"
-        MOD_NAME="Google 区域纠偏"
+    if [ $ROLL -le 95 ]; then
+        log "SYSTEM" "INFO " "✅ IP 已成功拉回并处于稳定期 (.geo_settled)，跳过本轮 Google 纠偏以防触发人机风控。"
+        exit 0
     else
         TARGET_MOD="mod_trust.sh"
         MOD_NAME="IP 信用净化"
     fi
-elif [ "$ENABLE_GOOGLE" == "true" ]; then
-    TARGET_MOD="mod_google.sh"
-    MOD_NAME="Google 区域纠偏"
-elif [ "$ENABLE_TRUST" == "true" ]; then
-    TARGET_MOD="mod_trust.sh"
-    MOD_NAME="IP 信用净化"
 else
-    log "SYSTEM" "WARN" "节点未开启任何养护模块，跳过本轮执行。"
-    exit 0
+    # 概率任务分配模型
+    if [ "$ENABLE_GOOGLE" == "true" ] && [ "$ENABLE_TRUST" == "true" ]; then
+        # 优先锚定地理画像，辅助洗刷风控分
+        ROLL=$((RANDOM % 100 + 1))
+        if [ $ROLL -le 70 ]; then
+            TARGET_MOD="mod_google.sh"
+            MOD_NAME="Google 区域纠偏"
+        else
+            TARGET_MOD="mod_trust.sh"
+            MOD_NAME="IP 信用净化"
+        fi
+    elif [ "$ENABLE_GOOGLE" == "true" ]; then
+        TARGET_MOD="mod_google.sh"
+        MOD_NAME="Google 区域纠偏"
+    elif [ "$ENABLE_TRUST" == "true" ]; then
+        TARGET_MOD="mod_trust.sh"
+        MOD_NAME="IP 信用净化"
+    else
+        log "SYSTEM" "WARN " "节点未开启任何养护模块，跳过本轮执行。"
+        exit 0
+    fi
 fi
 
 # ----------------------------------------------------------

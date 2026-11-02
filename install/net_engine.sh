@@ -148,6 +148,126 @@ do_assemble_fallback() {
     fi
 }
 
+do_timezone_align() {
+    if [ "$UPGRADE_MODE" == "false" ]; then
+        echo -e "\n\033[36m[4.7/7] 服务器时区环境侦测与人性化作息对齐...\033[0m"
+
+        # 1. 嗅探当前服务器时区
+        CURRENT_TZ=""
+        if command -v timedatectl >/dev/null 2>&1; then
+            CURRENT_TZ=$(timedatectl show --property=Timezone --value 2>/dev/null)
+        fi
+        [ -z "$CURRENT_TZ" ] && [ -f /etc/timezone ] && CURRENT_TZ=$(cat /etc/timezone 2>/dev/null | tr -d '[:space:]')
+        [ -z "$CURRENT_TZ" ] && [ -L /etc/localtime ] && CURRENT_TZ=$(readlink /etc/localtime 2>/dev/null | sed 's|.*/zoneinfo/||')
+        [ -z "$CURRENT_TZ" ] && CURRENT_TZ="UTC"
+
+        # 获取时区中文友好名称映射
+        get_tz_name() {
+            case "$1" in
+                "Asia/Shanghai") echo "中国标准时间" ;;
+                "Asia/Hong_Kong") echo "香港时间" ;;
+                "Asia/Taipei") echo "台北时间" ;;
+                "Asia/Tokyo") echo "日本标准时间" ;;
+                "Asia/Seoul") echo "韩国标准时间" ;;
+                "Asia/Singapore") echo "新加坡时间" ;;
+                "Asia/Bangkok") echo "泰国时间" ;;
+                "Asia/Kuala_Lumpur") echo "马来西亚时间" ;;
+                "Asia/Ho_Chi_Minh") echo "越南时间" ;;
+                "Asia/Manila") echo "菲律宾时间" ;;
+                "Asia/Jakarta") echo "印尼西部时间" ;;
+                "Asia/Kolkata") echo "印度标准时间" ;;
+                "Asia/Dubai") echo "阿联酋海湾时间" ;;
+                "America/New_York") echo "美国东部时间" ;;
+                "America/Chicago") echo "美国中部时间" ;;
+                "America/Denver") echo "美国山地时间" ;;
+                "America/Los_Angeles") echo "美国太平洋时间" ;;
+                "America/Toronto") echo "加拿大东部时间" ;;
+                "Europe/London") echo "英国伦敦时间" ;;
+                "Europe/Berlin") echo "德国柏林时间" ;;
+                "Europe/Paris") echo "法国巴黎时间" ;;
+                "Europe/Amsterdam") echo "荷兰阿姆斯特丹时间" ;;
+                "Australia/Sydney") echo "澳大利亚东部时间" ;;
+                "UTC") echo "协调世界时" ;;
+                *) date "+%Z" 2>/dev/null || echo "当地时间" ;;
+            esac
+        }
+        CURRENT_TZ_NAME=$(get_tz_name "$CURRENT_TZ")
+
+        # 2. 智能探测目标战区与 IP 对应时区
+        TARGET_TZ=""
+        RAW_IP_FOR_GEO=$(echo "${SAFE_PUBLIC_IP:-${PUBLIC_IP:-127.0.0.1}}" | tr -d '[]')
+        if [[ "$RAW_IP_FOR_GEO" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            DETECTED_IP_TZ=$(curl -s -m 3 "http://ip-api.com/json/${RAW_IP_FOR_GEO}?fields=timezone" 2>/dev/null | jq -r '.timezone // empty' 2>/dev/null)
+            if [ -n "$DETECTED_IP_TZ" ] && [ "$DETECTED_IP_TZ" != "null" ]; then
+                TARGET_TZ="$DETECTED_IP_TZ"
+            fi
+        fi
+
+        if [ -z "$TARGET_TZ" ]; then
+            CC="${COUNTRY_ID:-$REGION_CODE}"
+            CC="${CC%%-*}"
+            CC=$(echo "$CC" | tr 'a-z' 'A-Z')
+            case "$CC" in
+                "JP") TARGET_TZ="Asia/Tokyo" ;;
+                "HK") TARGET_TZ="Asia/Hong_Kong" ;;
+                "TW") TARGET_TZ="Asia/Taipei" ;;
+                "SG") TARGET_TZ="Asia/Singapore" ;;
+                "KR") TARGET_TZ="Asia/Seoul" ;;
+                "DE") TARGET_TZ="Europe/Berlin" ;;
+                "UK"|"GB") TARGET_TZ="Europe/London" ;;
+                "FR") TARGET_TZ="Europe/Paris" ;;
+                "NL") TARGET_TZ="Europe/Amsterdam" ;;
+                "TH") TARGET_TZ="Asia/Bangkok" ;;
+                "MY") TARGET_TZ="Asia/Kuala_Lumpur" ;;
+                "VN") TARGET_TZ="Asia/Ho_Chi_Minh" ;;
+                "PH") TARGET_TZ="Asia/Manila" ;;
+                "ID") TARGET_TZ="Asia/Jakarta" ;;
+                "IN") TARGET_TZ="Asia/Kolkata" ;;
+                "AU") TARGET_TZ="Australia/Sydney" ;;
+                "CA") TARGET_TZ="America/Toronto" ;;
+                "US")
+                    case "$STATE_ID" in
+                        "CA"|"WA"|"OR"|"NV") TARGET_TZ="America/Los_Angeles" ;;
+                        "IL"|"TX"|"MO")       TARGET_TZ="America/Chicago" ;;
+                        *)                    TARGET_TZ="America/New_York" ;;
+                    esac
+                    ;;
+                *) TARGET_TZ="UTC" ;;
+            esac
+        fi
+
+        TARGET_TZ_NAME=$(get_tz_name "$TARGET_TZ")
+        NODE_TIMEZONE="$TARGET_TZ"
+
+        # 3. 比较时区并交互确认
+        if [ "$CURRENT_TZ" == "$TARGET_TZ" ]; then
+            echo -e " \033[32m✅ 检测到当前服务器时区 (${CURRENT_TZ}) 与目标 IP 归属地一致，无需调整。\033[0m"
+        else
+            echo -e "当前服务器的时区设置是： \033[33m${CURRENT_TZ}（${CURRENT_TZ_NAME}）\033[0m，是否修改为ip对应的时区设置： \033[32m${TARGET_TZ}\033[0m？"
+            echo -e "（提示：后续养护动作会根据时区人员的作息规律更加人性化）【默认y】"
+            read -p "请输入选择 [y/n] (默认y): " TZ_CHANGE_CHOICE
+            TZ_CHANGE_CHOICE=${TZ_CHANGE_CHOICE:-y}
+
+            if [[ "$TZ_CHANGE_CHOICE" =~ ^[Yy]$ ]]; then
+                echo -n "⏳ 正在同步系统底层时区至 ${TARGET_TZ}..."
+                if command -v timedatectl >/dev/null 2>&1; then
+                    timedatectl set-timezone "$TARGET_TZ" >/dev/null 2>&1
+                fi
+                if [ -f "/usr/share/zoneinfo/$TARGET_TZ" ]; then
+                    ln -sf "/usr/share/zoneinfo/$TARGET_TZ" /etc/localtime 2>/dev/null
+                    echo "$TARGET_TZ" > /etc/timezone 2>/dev/null
+                fi
+                echo -e " \033[32m完成！\033[0m"
+                echo -e "✅ 服务器时区已成功修改为: \033[32m$TARGET_TZ\033[0m"
+                NODE_TIMEZONE="$TARGET_TZ"
+            else
+                echo -e "ℹ️ 已保留当前服务器时区设置 ($CURRENT_TZ)。"
+                NODE_TIMEZONE="$CURRENT_TZ"
+            fi
+        fi
+    fi
+}
+
 do_write_config() {
     if [ "$UPGRADE_MODE" == "false" ]; then
         echo -e "\n[5/7] 正在从云端数据仓库拉取 [${CITY_NAME}] 节点的底层规则..."
@@ -195,6 +315,7 @@ NODE_NAME="$NODE_NAME"
 NODE_ALIAS="$NODE_ALIAS"
 
 ENABLE_OTA="$ENABLE_OTA"
+TIMEZONE="${NODE_TIMEZONE:-$TARGET_TZ}"
 EOF
 
         chmod 600 "$CONFIG_FILE"

@@ -47,6 +47,7 @@ do_interactive_setup  # 逐级锁定战区城市、联控配置、端口探测 (
 # [网络雷达与身份装配阶段]
 do_network_probe      # 冗余双栈探测、网卡锁、WARP假公网隔离 (原版第 375-430 行)
 do_assemble_fallback  # 智能多宿主容灾弹匣装填、主键别名分离 (原版第 432-475 行)
+do_timezone_align     # 服务器时区环境侦测与人性化作息对齐
 do_write_config       # 固化本地本地 config.conf 档案 (原版第 477-512 行)
 
 # [老节点热重载平滑升级阶段 (仅限升级模式)]

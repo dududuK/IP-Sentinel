@@ -39,6 +39,21 @@ fi
 
 log "$MODULE_NAME" "START" "========== 唤醒网络模拟器 [区域: $REGION_NAME] =========="
 
+# ==========================================================
+# [风控熔断检查] 检查是否存在冷却锁定
+# ==========================================================
+COOLDOWN_LOCK="${INSTALL_DIR:-/opt/ip_sentinel}/core/.cooldown_until"
+if [ -f "$COOLDOWN_LOCK" ]; then
+    NOW=$(date +%s)
+    UNTIL=$(cat "$COOLDOWN_LOCK" 2>/dev/null || echo 0)
+    if [ "$NOW" -lt "$UNTIL" ]; then
+        log "$MODULE_NAME" "INFO " "处于自动风控熔断冷却期中 (剩余 $((UNTIL - NOW)) 秒)，静默跳过执行。"
+        exit 0
+    else
+        rm -f "$COOLDOWN_LOCK"
+    fi
+fi
+
 # --- [数据装配] ---
 UA_FILE="${INSTALL_DIR}/data/user_agents.txt"
 KW_FILE="${INSTALL_DIR}/data/keywords/kw_${REGION_CODE}.txt"
@@ -115,7 +130,8 @@ SESSION_BASE_LAT=$(get_random_coord $BASE_LAT 270)
 SESSION_BASE_LON=$(get_random_coord $BASE_LON 270)
 
 # 【核心升级】随机决定本次上网深度 (5 - 8 个复合动作，配合高频长效拉伸)
-TOTAL_ACTIONS=$((5 + RANDOM % 4))
+# 【核心升级】降低频次以避开自动化风控 (2 - 3 个动作)
+TOTAL_ACTIONS=$((2 + RANDOM % 2))
 
 log "$MODULE_NAME" "INFO " "当前出网 IP: $CURRENT_IP"
 log "$MODULE_NAME" "INFO " "设备指纹锁定: ${SESSION_UA:0:45}..."
@@ -256,14 +272,37 @@ for ((i=1; i<=TOTAL_ACTIONS; i++)); do
         "EcoRoam"*) CTX_REF="$REF_ECO" ;;
     esac
 
-    # [v4.1.3 & v4.1.5 修复] 统一执行 curl，70% 概率携带同业务域 Referer
-    if [ -n "$CTX_REF" ] && [ $((RANDOM % 100)) -lt 70 ]; then
-        CODE=$(curl "${CURL_BIND_ARGS[@]}" "$DYNAMIC_IP_PREF" -m 15 -s -L -o /dev/null -w "%{http_code}" \
-             -b "$COOKIE_FILE" -c "$COOKIE_FILE" -A "$SESSION_UA" -H "Referer: $CTX_REF" "$TARGET_URL")
-    else
-        CODE=$(curl "${CURL_BIND_ARGS[@]}" "$DYNAMIC_IP_PREF" -m 15 -s -L -o /dev/null -w "%{http_code}" \
-             -b "$COOKIE_FILE" -c "$COOKIE_FILE" -A "$SESSION_UA" "$TARGET_URL")
+    # [Chromium/Chrome 现代浏览器指纹标准构建]
+    CH_MOBILE="?0"
+    if [ "$UA_PLATFORM" == "android" ] || [ "$UA_PLATFORM" == "ios" ]; then
+        CH_MOBILE="?1"
     fi
+
+    CH_SITE="none"
+    REF_ARG=()
+    if [ -n "$CTX_REF" ] && [ $((RANDOM % 100)) -lt 70 ]; then
+        CH_SITE="same-origin"
+        REF_ARG=(-H "Referer: $CTX_REF")
+    fi
+
+    CURL_BROWSER_HEADERS=(
+        --compressed
+        -H 'Sec-Ch-Ua: "Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"'
+        -H "Sec-Ch-Ua-Mobile: ${CH_MOBILE}"
+        -H "Sec-Ch-Ua-Platform: \"$UA_PLATFORM\""
+        -H "Sec-Fetch-Dest: document"
+        -H "Sec-Fetch-Mode: navigate"
+        -H "Sec-Fetch-Site: ${CH_SITE}"
+        -H "Sec-Fetch-User: ?1"
+        -H "Upgrade-Insecure-Requests: 1"
+        -H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
+        -H "Accept-Encoding: gzip, deflate, br, zstd"
+        -H "Accept-Language: ${LANG_ACCEPT:-en-US,en;q=0.9}"
+    )
+    [ ${#REF_ARG[@]} -gt 0 ] && CURL_BROWSER_HEADERS+=("${REF_ARG[@]}")
+
+    CODE=$(curl "${CURL_BIND_ARGS[@]}" "$DYNAMIC_IP_PREF" -m 15 -s -L -o /dev/null -w "%{http_code}" \
+         -b "$COOKIE_FILE" -c "$COOKIE_FILE" -A "$SESSION_UA" "${CURL_BROWSER_HEADERS[@]}" "$TARGET_URL")
     CURL_EXIT=$?
     
     # 错误码精准映射（不破坏原有的 SCORE 送中判定，只让动作日志更清晰）
@@ -297,6 +336,15 @@ for ((i=1; i<=TOTAL_ACTIONS; i++)); do
                 "EcoRoam"*) REF_ECO="$TARGET_URL" ;;
             esac
         fi
+    fi
+
+    # [Circuit Breaker: WAF 自动熔断保护]
+    if [ "$CODE" == "429" ] || [ "$CODE" == "503" ] || [ "$CODE" == "ERR_RESET" ] || [ "$CURL_EXIT" -eq 56 ]; then
+        log "$MODULE_NAME" "WARN " "检测到 429 或服务异常，触发全自动风控熔断保护！"
+        rm -f "$COOKIE_FILE"
+        echo "$(($(date +%s) + 86400))" > "$COOLDOWN_LOCK"
+        log "$MODULE_NAME" "WARN " "已设置 24 小时冷冻期，等待 Google 积分自然衰减。"
+        exit 0
     fi
     
     # 【核心升级】行为拉伸：每次动作后强制休眠 90 - 120 秒
@@ -427,4 +475,12 @@ else
 fi
 
 log "$MODULE_NAME" "SCORE" "自检结论: $STATUS"
+
+# [稳定态标记更新: 达标自动打标，漂移自动解标]
+if [[ "$STATUS" == *"目标区域达成"* ]]; then
+    touch "${INSTALL_DIR:-/opt/ip_sentinel}/core/.geo_settled"
+elif [[ "$STATUS" == *"送中"* ]] || [[ "$STATUS" == *"漂移"* ]]; then
+    rm -f "${INSTALL_DIR:-/opt/ip_sentinel}/core/.geo_settled" 2>/dev/null
+fi
+
 log "$MODULE_NAME" "END  " "========== 会话结束，释放进程 =========="
