@@ -20,7 +20,7 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 SECURE_TMP=$(mktemp -d /tmp/ips_master_install.XXXXXX)
-REPO_RAW_URL="https://raw.githubusercontent.com/hotyue/IP-Sentinel/main"
+REPO_RAW_URL="https://raw.githubusercontent.com/dududuK/IP-Sentinel/main"
 
 # ----------------------------------------------------------
 # [核心架构升级] 动态嗅探云端真理之源 (SSOT)

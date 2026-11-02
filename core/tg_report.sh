@@ -197,7 +197,7 @@ LOCAL_VER="${AGENT_VERSION:-未知}"
 # [时间线对齐] 强制采用绝对 UTC 时间消除多节点的系统偏差
 REPORT_UTC_TIME=$(date -u "+%Y-%m-%d %H:%M:%S UTC")
 
-REPO_RAW_URL="https://raw.githubusercontent.com/hotyue/IP-Sentinel/main"
+REPO_RAW_URL="https://raw.githubusercontent.com/dududuK/IP-Sentinel/main"
 REMOTE_VER=$(curl -s -m 3 "${REPO_RAW_URL}/version.txt" | grep "^AGENT_VERSION=" | cut -d'=' -f2 | tr -d '[:space:]')
 
 MSG="$MSG

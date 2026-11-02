@@ -52,14 +52,13 @@ do_deploy_core() {
     TMP_CORE="${SECURE_TMP}/core_update"
     mkdir -p "$TMP_CORE"
 
-    curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/core/runner.sh" -o "${TMP_CORE}/runner.sh"
-    curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/core/updater.sh" -o "${TMP_CORE}/updater.sh"
-    curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/core/tg_report.sh" -o "${TMP_CORE}/tg_report.sh"
-    curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/core/agent_daemon.sh" -o "${TMP_CORE}/agent_daemon.sh"
-    curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/core/uninstall.sh" -o "${TMP_CORE}/uninstall.sh"
-    curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/core/mod_google.sh" -o "${TMP_CORE}/mod_google.sh"
-    curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/core/mod_trust.sh" -o "${TMP_CORE}/mod_trust.sh"
-    curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/core/mod_quality.sh" -o "${TMP_CORE}/mod_quality.sh"
+for c_file in "runner.sh" "updater.sh" "tg_report.sh" "agent_daemon.sh" "uninstall.sh" "mod_google.sh" "mod_trust.sh" "mod_quality.sh"; do
+        if [ -n "$LOCAL_REPO_DIR" ] && [ -s "${LOCAL_REPO_DIR}/core/${c_file}" ]; then
+            cp "${LOCAL_REPO_DIR}/core/${c_file}" "${TMP_CORE}/${c_file}"
+        else
+            curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/core/${c_file}" -o "${TMP_CORE}/${c_file}"
+        fi
+    done
 
     # 🛡️ 终极自检墙：一旦任意文件缺失或长度为零，直接熔断放弃覆写，确保宿主不宕机
     if [ ! -s "${TMP_CORE}/runner.sh" ] || [ ! -s "${TMP_CORE}/agent_daemon.sh" ]; then
@@ -85,11 +84,24 @@ do_deploy_core() {
     mv "$TMP_CORE" "${INSTALL_DIR}/core"
     chmod +x ${INSTALL_DIR}/core/*.sh
 
-    curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/data/user_agents.txt" -o "${INSTALL_DIR}/data/user_agents.txt"
-    if [ "$UPGRADE_MODE" == "false" ]; then
-        curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/data/keywords/${KEYWORD_FILE}" -o "${INSTALL_DIR}/data/keywords/${KEYWORD_FILE}"
+if [ -n "$LOCAL_REPO_DIR" ] && [ -s "${LOCAL_REPO_DIR}/data/user_agents.txt" ]; then
+        cp "${LOCAL_REPO_DIR}/data/user_agents.txt" "${INSTALL_DIR}/data/user_agents.txt"
     else
-        curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/data/keywords/kw_${REGION_CODE}.txt" -o "${INSTALL_DIR}/data/keywords/kw_${REGION_CODE}.txt" 2>/dev/null || true
+        curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/data/user_agents.txt" -o "${INSTALL_DIR}/data/user_agents.txt"
+    fi
+
+    if [ "$UPGRADE_MODE" == "false" ]; then
+        if [ -n "$LOCAL_REPO_DIR" ] && [ -s "${LOCAL_REPO_DIR}/data/keywords/${KEYWORD_FILE}" ]; then
+            cp "${LOCAL_REPO_DIR}/data/keywords/${KEYWORD_FILE}" "${INSTALL_DIR}/data/keywords/${KEYWORD_FILE}"
+        else
+            curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/data/keywords/${KEYWORD_FILE}" -o "${INSTALL_DIR}/data/keywords/${KEYWORD_FILE}"
+        fi
+    else
+        if [ -n "$LOCAL_REPO_DIR" ] && [ -s "${LOCAL_REPO_DIR}/data/keywords/kw_${REGION_CODE}.txt" ]; then
+            cp "${LOCAL_REPO_DIR}/data/keywords/kw_${REGION_CODE}.txt" "${INSTALL_DIR}/data/keywords/kw_${REGION_CODE}.txt" 2>/dev/null || true
+        else
+            curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/data/keywords/kw_${REGION_CODE}.txt" -o "${INSTALL_DIR}/data/keywords/kw_${REGION_CODE}.txt" 2>/dev/null || true
+        fi
     fi
 }
 

@@ -6,7 +6,11 @@
 
 do_fetch_map() {
     echo -e "\n[2/7] 正在连线云端，拉取全球节点地图..."
-    curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/data/map.json" -o "${SECURE_TMP}/map.json"
+    if [ -n "$LOCAL_REPO_DIR" ] && [ -s "${LOCAL_REPO_DIR}/data/map.json" ]; then
+        cp "${LOCAL_REPO_DIR}/data/map.json" "${SECURE_TMP}/map.json"
+    else
+        curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/data/map.json" -o "${SECURE_TMP}/map.json"
+    fi
     if [ ! -s "${SECURE_TMP}/map.json" ]; then
         echo -e "\033[31m❌ 拉取全球地图失败！请检查网络或 GitHub 仓库地址。\033[0m"
         exit 1
@@ -554,6 +558,6 @@ do_show_summary() {
     echo -e "\n========================================================"
     echo -e "⭐ \033[33m开源不易，如果 IP-Sentinel 提升了您的节点稳定性，请赐予我们一枚星标！\033[0m"
     echo -e "💡 \033[32m您的每一颗 Star 都是我们持续对抗风控、维护更新指纹库的核心动力。\033[0m"
-    echo -e "👉 \033[36m\033[4m\033]8;;https://github.com/hotyue/IP-Sentinel\033\\点击此处直达 GitHub 仓库点亮 Star 🌟\033[0m\033]8;;\033\\"
+    echo -e "👉 \033[36m\033[4m\033]8;;https://github.com/dududuK/IP-Sentinel\033\\点击此处直达 GitHub 仓库点亮 Star 🌟\033[0m\033]8;;\033\\"
     echo -e "========================================================\n"
 }

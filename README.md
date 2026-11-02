@@ -2,7 +2,7 @@
 
 ![Agent Installs](https://img.shields.io/endpoint?url=https://ip-sentinel-count.samanthaestime296.workers.dev/stats/agent)
 ![Master Commands](https://img.shields.io/endpoint?url=https://ip-sentinel-count.samanthaestime296.workers.dev/stats/master)
-![License](https://img.shields.io/github/license/hotyue/IP-Sentinel)
+![License](https://img.shields.io/github/license/dududuK/IP-Sentinel)
 
 > **一个极度轻量、零感知、支持中枢遥控的 VPS IP 自动化养护与区域纠偏引擎。**
 > **💡 提示：如果本项目提升了您的节点稳定性，请点击右上角点亮 🌟 Star！您的支持是我们持续研发和维护指纹库的核心动力。**
@@ -62,12 +62,12 @@
 - **部署 Master (中枢大脑)**：找一台 VPS 作为司令部（仅需部署一台,可以与Agent装在同一台VPS），执行：
 - [官方部署教程](https://blog.iot-architect.com/engineering-practice/ip-sentinel-master-deployment-guide/)
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/hotyue/IP-Sentinel/main/master/install_master.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/dududuK/IP-Sentinel/main/master/install_master.sh)"
 ```
 - 部署 Agent (边缘哨兵)：在需要养护的机器上执行 Agent 脚本，安装时选择私有独立中枢，并分别输入您自建机器人的 [Token](https://blog.iot-architect.com/engineering-practice/create-private-telegram-bot-via-botfather) 以及您的个人 [Chat ID](https://blog.iot-architect.com/engineering-practice/get-telegram-personal-id-via-userinfobot) ：
 - [官方部署教程](https://blog.iot-architect.com/engineering-practice/ip-sentinel-installation-and-upgrade-guide/)
 ```Bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/hotyue/IP-Sentinel/main/install.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/dududuK/IP-Sentinel/main/install.sh)"
 ```
 - 激活节点：安装完成后，您的手机会收到一条 #REGISTER# 注册暗号，将其转发给您自己的机器人即可完成编队入库。
 
@@ -81,7 +81,7 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/hotyue/IP-Sentinel/main/
 - 部署 Agent：在目标 VPS 上执行以下指令，安装过程中选择官方公共网关，并输入您的 Chat ID：
 - [官方部署教程](https://blog.iot-architect.com/engineering-practice/deploy-ip-sentinel-official-gateway/)
 ```Bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/hotyue/IP-Sentinel/main/install.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/dududuK/IP-Sentinel/main/install.sh)"
 ```
 - 激活节点：同上，将收到的暗号转发给官方机器人即可。
 
@@ -116,7 +116,7 @@ bash /opt/ip_sentinel/core/uninstall.sh
 *(注意：该分支仅作基础维护，不享受新功能迭代，请尽可能升级你的系统)*
 
 ```bash
-bash <(curl -sL https://raw.githubusercontent.com/hotyue/IP-Sentinel/legacy/core/install.sh)
+bash <(curl -sL https://raw.githubusercontent.com/dududuK/IP-Sentinel/legacy/core/install.sh)
 ```
 
 ## 📡 战术联络 (Community)
@@ -128,8 +128,8 @@ bash <(curl -sL https://raw.githubusercontent.com/hotyue/IP-Sentinel/legacy/core
 
 **🌟 感谢以下所有为 IP-Sentinel 添砖加瓦的指挥官们！** 你们的每一次 PR 都在让这艘战舰的全球雷达覆盖得更广。
 
-<a href="https://github.com/hotyue/IP-Sentinel/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=hotyue/IP-Sentinel" alt="Contributors" />
+<a href="https://github.com/dududuK/IP-Sentinel/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=dududuK/IP-Sentinel" alt="Contributors" />
 </a>
 
 如果你想为项目增加新的节点区域（例如德国、英国、大洋洲等），或者提供更丰富的本土化搜索词库，非常欢迎提交 Pull Request！
@@ -154,4 +154,4 @@ bash <(curl -sL https://raw.githubusercontent.com/hotyue/IP-Sentinel/legacy/core
 
 
 ### 📈 Stargazers over time
-![Star History](https://raw.githubusercontent.com/hotyue/IP-Sentinel/main/data/star_history.svg?v=1)
+![Star History](https://raw.githubusercontent.com/dududuK/IP-Sentinel/main/data/star_history.svg?v=1)

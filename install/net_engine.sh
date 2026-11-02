@@ -272,7 +272,11 @@ do_write_config() {
     if [ "$UPGRADE_MODE" == "false" ]; then
         echo -e "\n[5/7] 正在从云端数据仓库拉取 [${CITY_NAME}] 节点的底层规则..."
         REGION_JSON_FILE="${INSTALL_DIR}/data/regions/${COUNTRY_ID}/${STATE_ID}/${CITY_ID}.json"
-        curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/data/regions/${COUNTRY_ID}/${STATE_ID}/${CITY_ID}.json" -o "$REGION_JSON_FILE"
+        if [ -n "$LOCAL_REPO_DIR" ] && [ -s "${LOCAL_REPO_DIR}/data/regions/${COUNTRY_ID}/${STATE_ID}/${CITY_ID}.json" ]; then
+            cp "${LOCAL_REPO_DIR}/data/regions/${COUNTRY_ID}/${STATE_ID}/${CITY_ID}.json" "$REGION_JSON_FILE"
+        else
+            curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/data/regions/${COUNTRY_ID}/${STATE_ID}/${CITY_ID}.json" -o "$REGION_JSON_FILE"
+        fi
 
         if [ ! -s "$REGION_JSON_FILE" ]; then
             echo "❌ 拉取或解析规则失败！请检查 Forgejo 仓库是否公开或网络是否畅通。"

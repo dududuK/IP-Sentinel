@@ -15,9 +15,13 @@ MODULES=(
     "sys_daemon.sh"
 )
 
-# 1. 串行拉取子模块资产
+# 1. 串行拉取或本地载入子模块资产
 for mod in "${MODULES[@]}"; do
-    curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/install/${mod}?t=$(date +%s)" -o "${SECURE_TMP}/${mod}"
+    if [ -n "$LOCAL_REPO_DIR" ] && [ -s "${LOCAL_REPO_DIR}/install/${mod}" ]; then
+        cp "${LOCAL_REPO_DIR}/install/${mod}" "${SECURE_TMP}/${mod}"
+    else
+        curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/install/${mod}?t=$(date +%s)" -o "${SECURE_TMP}/${mod}"
+    fi
     if [ ! -s "${SECURE_TMP}/${mod}" ]; then
         echo -e "\033[31m❌ 致命错误：依赖模块 [${mod}] 装载失败！\033[0m"
         exit 1
