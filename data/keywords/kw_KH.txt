@@ -1,3 +1,5 @@
+bomb threat
+forex factory
 fraud
 weather
 adam robinson
@@ -48,7 +50,6 @@ phnom penh crown
 inter miami vs cincinnati
 liverpool vs chelsea
 ac milan
-forex factory
 weather tomorrow
 israeli election results
 apple
@@ -97,4 +98,3 @@ leeds vs man utd
 katie zacharia
 atlanta united vs inter miami
 real betis vs fc barcelona standings
-strasbourg vs psg
