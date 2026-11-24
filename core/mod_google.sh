@@ -54,6 +54,14 @@ if [ -f "$COOLDOWN_LOCK" ]; then
     fi
 fi
 
+# --- [共享人格库] 指纹自洽的唯一权威来源 ---
+if [ ! -f "${INSTALL_DIR}/core/agent_common.sh" ]; then
+    log "$MODULE_NAME" "ERROR" "共享人格库缺失 (agent_common.sh)，终止执行。"
+    exit 1
+fi
+# shellcheck disable=SC1091
+source "${INSTALL_DIR}/core/agent_common.sh"
+
 # --- [数据装配] ---
 UA_FILE="${INSTALL_DIR}/data/user_agents.txt"
 KW_FILE="${INSTALL_DIR}/data/keywords/kw_${REGION_CODE}.txt"
@@ -63,7 +71,6 @@ if [ ! -f "$UA_FILE" ] || [ ! -f "$KW_FILE" ]; then
     exit 1
 fi
 
-mapfile -t UA_POOL < <(grep -v '^$' "$UA_FILE")
 mapfile -t KEYWORDS < <(grep -v '^[[:space:]]*$' "$KW_FILE")
 
 # [v4.1.5 修复] 防止关键词池为空导致 RANDOM % 0 直接语法崩溃
@@ -85,38 +92,19 @@ get_random_coord() {
 CURRENT_IP="${PUBLIC_IP:-${BIND_IP:-Unknown}}"
 
 # -----------------------------------------------------------
-# [指纹固化] 哈希锚定法 (Hash-Seeded Persona)
-# 基于 IP 算力固定会话指纹池，彻底破除僵尸网络同质化特征
+# [人格档案固化] Persona Loader (agent_common.sh)
+# 每节点按月轮换一套 UA 画像并落盘固化，根治"同一 Cookie
+# 每轮换设备"的机器人特征；UA/Client Hints/语言头全自洽
 # -----------------------------------------------------------
-TOTAL_UA=${#UA_POOL[@]}
-if [ "$TOTAL_UA" -gt 0 ]; then
-    SEED=$(echo -n "$CURRENT_IP" | cksum | awk '{print $1}')
-    
-    IDX1=$(( SEED % TOTAL_UA ))
-    IDX2=$(( (SEED * 17) % TOTAL_UA ))
-    IDX3=$(( (SEED * 31) % TOTAL_UA ))
-    
-    MY_UA_POOL=("${UA_POOL[$IDX1]}" "${UA_POOL[$IDX2]}" "${UA_POOL[$IDX3]}")
-    SESSION_UA=${MY_UA_POOL[$RANDOM % 3]}
-else
-    # [极简兜底] 降维指纹防御崩溃
-    SESSION_UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+TOTAL_UA=$(grep -cv '^[[:space:]]*$' "$UA_FILE" 2>/dev/null || echo 0)
+if [ "$TOTAL_UA" -eq 0 ]; then
+    log "$MODULE_NAME" "ERROR" "UA 指纹库为空，终止执行。"
+    exit 1
 fi
 
-# -----------------------------------------------------------
-# [v4.1.4 平台身份提取器 (Persona Mapper)]
-# 识别当前指纹的系统平台，杜绝跨平台的底层探针穿帮
-# -----------------------------------------------------------
-UA_PLATFORM="windows"
-if [[ "$SESSION_UA" == *"Android"* ]]; then
-    UA_PLATFORM="android"
-elif [[ "$SESSION_UA" == *"iPhone"* ]] || [[ "$SESSION_UA" == *"iPad"* ]]; then
-    UA_PLATFORM="ios"
-elif [[ "$SESSION_UA" == *"Macintosh"* ]]; then
-    UA_PLATFORM="macos"
-elif [[ "$SESSION_UA" == *"Linux"* ]]; then
-    UA_PLATFORM="linux"
-fi
+sentinel_ensure_persona
+SESSION_UA="$PERSONA_UA"
+UA_PLATFORM="$PERSONA_OS"
 
 # [v4.1.5 防御] 坐标缺失直接终止，禁止生成错误地理画像
 if ! [[ "$BASE_LAT" =~ ^-?[0-9]+(\.[0-9]+)?$ ]] || \
@@ -129,9 +117,8 @@ fi
 SESSION_BASE_LAT=$(get_random_coord $BASE_LAT 270)
 SESSION_BASE_LON=$(get_random_coord $BASE_LON 270)
 
-# 【核心升级】随机决定本次上网深度 (5 - 8 个复合动作，配合高频长效拉伸)
-# 【核心升级】降低频次以避开自动化风控 (2 - 3 个动作)
-TOTAL_ACTIONS=$((2 + RANDOM % 2))
+# 【行为深度】2 - 4 个复合动作，长尾分布模拟真人浏览深度
+TOTAL_ACTIONS=$((2 + RANDOM % 3))
 
 log "$MODULE_NAME" "INFO " "当前出网 IP: $CURRENT_IP"
 log "$MODULE_NAME" "INFO " "设备指纹锁定: ${SESSION_UA:0:45}..."
@@ -145,7 +132,7 @@ log "$MODULE_NAME" "INFO " "虚拟驻留坐标: $SESSION_BASE_LAT, $SESSION_BASE
 COOKIE_DIR="${INSTALL_DIR}/data/cookies"
 mkdir -p "$COOKIE_DIR"
 
-NODE_HASH=$(echo -n "$CURRENT_IP" | cksum | awk '{print $1}')
+NODE_HASH=$(sentinel_node_hash)
 COOKIE_FILE="${COOKIE_DIR}/google_${NODE_HASH}.txt"
 
 # [互斥锁] 防止会话重叠导致的 Cookie 文件读写冲突
@@ -192,6 +179,23 @@ REF_SEARCH=""
 REF_NEWS=""
 REF_MAPS=""
 REF_ECO=""
+REF_EXT=""
+
+# [生态漫游池] 从区域规则库提取非 Google 本地站点，
+# 低概率掺入行为序列，打散"全打 google.com"的流量指纹
+ECO_URLS=()
+REGION_JSON=$(sentinel_region_json 2>/dev/null || true)
+if [ -n "$REGION_JSON" ] && command -v jq >/dev/null 2>&1; then
+    mapfile -t ECO_URLS < <(jq -r '.trust_module.white_urls[]' "$REGION_JSON" 2>/dev/null \
+        | grep -vE 'google\.|gstatic|youtube' | grep -v '^[[:space:]]*$')
+fi
+
+# [传输层] 优先 curl-impersonate 真实浏览器 TLS 指纹，缺失回退 curl
+CURL_BIN=$(sentinel_curl_bin "$PERSONA_FAMILY")
+log "$MODULE_NAME" "INFO " "传输引擎: $CURL_BIN | 浏览器家族: $PERSONA_FAMILY | 生态池: ${#ECO_URLS[@]} 个本地站点"
+
+# [人格指纹头] 全会话静态部分一次性构建（Sec-Fetch-Site 按请求动态拼接）
+sentinel_build_headers
 
 # --- [会话漫游模拟] ---
 for ((i=1; i<=TOTAL_ACTIONS; i++)); do
@@ -214,7 +218,11 @@ for ((i=1; i<=TOTAL_ACTIONS; i++)); do
     TARGET_URL=""
     ACTION_LOG=""
 
-    if [ "$UA_PLATFORM" == "android" ]; then
+    # [行为多样化] 低概率切入本地生态站点漫游，脱离 Google 同域聚类
+    if [ ${#ECO_URLS[@]} -gt 0 ] && [ $ACTION_DICE -lt 8 ]; then
+        TARGET_URL="${ECO_URLS[$((RANDOM % ${#ECO_URLS[@]}))]}"
+        ACTION_LOG="ExtSurf"
+    elif [ "$UA_PLATFORM" == "android" ]; then
         if [ $ACTION_DICE -lt 25 ]; then
             TARGET_URL="https://www.google.com/search?q=${ENCODED_KEY}&${LANG_PARAMS}"
             ACTION_LOG="Search "
@@ -253,8 +261,9 @@ for ((i=1; i<=TOTAL_ACTIONS; i++)); do
             TARGET_URL="https://news.google.com/home?${LANG_PARAMS}"
             ACTION_LOG="News   "
         elif [ $ACTION_DICE -lt 80 ]; then
-            # 引入桌面端低危生态池漫游
-            LOW_RISK_ECO=("https://about.google/" "https://safety.google/" "https://support.google.com/?hl=${LANG_ACCEPT%%,*}")
+            # 引入桌面端低危生态池漫游（hl 取区域语言参数，杜绝 en-US 硬编码）
+            ECO_HL=$(printf '%s' "$LANG_PARAMS" | grep -o 'hl=[^&]*' | head -n1 | cut -d= -f2)
+            LOW_RISK_ECO=("https://about.google/" "https://safety.google/" "https://support.google.com/?hl=${ECO_HL:-en}")
             TARGET_URL="${LOW_RISK_ECO[$((RANDOM % ${#LOW_RISK_ECO[@]}))]}"
             ACTION_LOG="EcoRoam"
         else
@@ -270,39 +279,35 @@ for ((i=1; i<=TOTAL_ACTIONS; i++)); do
         "News   "*) CTX_REF="$REF_NEWS" ;;
         "Maps   "*) CTX_REF="$REF_MAPS" ;;
         "EcoRoam"*) CTX_REF="$REF_ECO" ;;
+        "ExtSurf"*) CTX_REF="$REF_EXT" ;;
     esac
 
-    # [Chromium/Chrome 现代浏览器指纹标准构建]
-    CH_MOBILE="?0"
-    if [ "$UA_PLATFORM" == "android" ] || [ "$UA_PLATFORM" == "ios" ]; then
-        CH_MOBILE="?1"
-    fi
+    # [指纹自洽] 人格库静态头 + 按请求动态拼接 Sec-Fetch-Site / Referer
+    # Safari/other 不发送 Fetch Metadata，严禁跨引擎头污染；Referer 各家通用
+    WANT_REF=0
+    [ -n "$CTX_REF" ] && [ $((RANDOM % 100)) -lt 70 ] && WANT_REF=1
 
+    # Fetch Metadata 站点关系必须如实上报：
+    # Google 系内跳转是 same-site（跨子域），生态外站是 cross-site，
+    # 伪造 same-origin 反而是穿帮特征
     CH_SITE="none"
-    REF_ARG=()
-    if [ -n "$CTX_REF" ] && [ $((RANDOM % 100)) -lt 70 ]; then
-        CH_SITE="same-origin"
-        REF_ARG=(-H "Referer: $CTX_REF")
-    fi
+    case "$ACTION_LOG" in
+        "Search "*|"News   "*|"Maps   "*|"EcoRoam"*)
+            [ "$WANT_REF" -eq 1 ] && CH_SITE="same-site" ;;
+        "ExtSurf"*)
+            [ "$WANT_REF" -eq 1 ] && CH_SITE="cross-site" ;;
+    esac
 
-    CURL_BROWSER_HEADERS=(
-        --compressed
-        -H 'Sec-Ch-Ua: "Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"'
-        -H "Sec-Ch-Ua-Mobile: ${CH_MOBILE}"
-        -H "Sec-Ch-Ua-Platform: \"$UA_PLATFORM\""
-        -H "Sec-Fetch-Dest: document"
-        -H "Sec-Fetch-Mode: navigate"
-        -H "Sec-Fetch-Site: ${CH_SITE}"
-        -H "Sec-Fetch-User: ?1"
-        -H "Upgrade-Insecure-Requests: 1"
-        -H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
-        -H "Accept-Encoding: gzip, deflate, br, zstd"
-        -H "Accept-Language: ${LANG_ACCEPT:-en-US,en;q=0.9}"
-    )
-    [ ${#REF_ARG[@]} -gt 0 ] && CURL_BROWSER_HEADERS+=("${REF_ARG[@]}")
+    REQ_HEADERS=("${SENT_HEADER_ARGS[@]}")
+    case "$PERSONA_FAMILY" in
+        chrome|edge|firefox)
+            REQ_HEADERS+=(-H "Sec-Fetch-Site: ${CH_SITE}")
+            ;;
+    esac
+    [ "$WANT_REF" -eq 1 ] && REQ_HEADERS+=(-H "Referer: $CTX_REF")
 
-    CODE=$(curl "${CURL_BIND_ARGS[@]}" "$DYNAMIC_IP_PREF" -m 15 -s -L -o /dev/null -w "%{http_code}" \
-         -b "$COOKIE_FILE" -c "$COOKIE_FILE" -A "$SESSION_UA" "${CURL_BROWSER_HEADERS[@]}" "$TARGET_URL")
+    CODE=$("$CURL_BIN" "${CURL_BIND_ARGS[@]}" "$DYNAMIC_IP_PREF" -m 15 -s -L --compressed -o /dev/null -w "%{http_code}" \
+         -b "$COOKIE_FILE" -c "$COOKIE_FILE" -A "$SESSION_UA" "${REQ_HEADERS[@]}" "$TARGET_URL")
     CURL_EXIT=$?
     
     # 错误码精准映射（不破坏原有的 SCORE 送中判定，只让动作日志更清晰）
@@ -323,6 +328,7 @@ for ((i=1; i<=TOTAL_ACTIONS; i++)); do
             "News   "*) REF_NEWS="" ;;
             "Maps   "*) REF_MAPS="" ;;
             "EcoRoam"*) REF_ECO="" ;;
+            "ExtSurf"*) REF_EXT="" ;;
         esac
     else
         log "$MODULE_NAME" "EXEC " "动作[$i/$TOTAL_ACTIONS]完成 | HTTP状态: $CODE | 抖动坐标: $ACTION_LAT, $ACTION_LON"
@@ -334,6 +340,7 @@ for ((i=1; i<=TOTAL_ACTIONS; i++)); do
                 "News   "*) REF_NEWS="$TARGET_URL" ;;
                 "Maps   "*) REF_MAPS="$TARGET_URL" ;;
                 "EcoRoam"*) REF_ECO="$TARGET_URL" ;;
+                "ExtSurf"*) REF_EXT="$TARGET_URL" ;;
             esac
         fi
     fi
@@ -347,11 +354,17 @@ for ((i=1; i<=TOTAL_ACTIONS; i++)); do
         exit 0
     fi
     
-    # 【核心升级】行为拉伸：每次动作后强制休眠 90 - 120 秒
-    # 结合动作总数，总耗时将稳定在 10 分钟 到 20 分钟之间
+    # 【行为拉伸】泊松长尾停留分布，模拟真人阅读节奏，
+    # 杜绝"固定 45-75 秒机械节拍"的自动化聚类特征
     if [ $i -lt $TOTAL_ACTIONS ]; then
-        # 【时间收敛修复】休眠控制在 45-75 秒，防止跨周期重叠导致进程被强杀
-        SLEEP_TIME=$((45 + RANDOM % 31))
+        SLEEP_DICE=$((RANDOM % 100))
+        if [ $SLEEP_DICE -lt 55 ]; then
+            SLEEP_TIME=$((30 + RANDOM % 41))      # 30 - 70s (55%)
+        elif [ $SLEEP_DICE -lt 85 ]; then
+            SLEEP_TIME=$((70 + RANDOM % 81))     # 70 - 150s (30%)
+        else
+            SLEEP_TIME=$((150 + RANDOM % 151))   # 150 - 300s (15%)
+        fi
         log "$MODULE_NAME" "WAIT " "阅读当前页面内容，模拟停留 $SLEEP_TIME 秒..."
         sleep "$SLEEP_TIME"
     fi
@@ -364,7 +377,7 @@ log "$MODULE_NAME" "INFO " "启动三核交叉验证 (URL跳转 + YT Premium + Y
 
 # 核心 1: 传统 URL 跳转探测 (请求 www 才能触发准确跳转)
 # [v4.1.2] 追加持久化 Cookie
-JUMP_HDR=$(curl "${CURL_BIND_ARGS[@]}" "$DYNAMIC_IP_PREF" -m 10 -sI -b "$COOKIE_FILE" -c "$COOKIE_FILE" "http://www.google.com/")
+JUMP_HDR=$("$CURL_BIN" "${CURL_BIND_ARGS[@]}" "$DYNAMIC_IP_PREF" -m 10 -sI --compressed -b "$COOKIE_FILE" -c "$COOKIE_FILE" "http://www.google.com/")
 JUMP_LOC=$(echo "$JUMP_HDR" | grep -i "^location:" | tr -d '\r\n')
 JUMP_GL=""
 
@@ -407,12 +420,11 @@ else
 fi
 
 # ==========================================================
-# [v4.2.3 修复 - PR #82 剥离探测身份]
-# 抛弃模拟人类漫游时使用的混杂老旧 UA 及污染 Cookie，
-# 强制使用绝对干净且现代的 Windows Chrome UA 发起探针裸请求，
-# 确保边缘服务器必定下发完整的 SPA 框架页面，防止 INNERTUBE 提取报错。
+# [v4.4.0 指纹自洽] 探针复用人格档案 UA 与传输引擎，
+# 同一出口 IP 的漫游会话与探测请求保持同一设备画像，
+# 杜绝"浏览器 UA 漫游 + 裸 curl 探针"的双画像穿帮
 # ==========================================================
-PROBE_UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+PROBE_UA="$SESSION_UA"
 
 extract_yt_gl() {
     grep -Eo '"(contentRegion|countryCode|INNERTUBE_CONTEXT_GL|GL)":"[A-Za-z]{2}"' | head -n 1 | cut -d'"' -f4 | tr 'a-z' 'A-Z'
@@ -420,7 +432,7 @@ extract_yt_gl() {
 
 # 核心 2: YouTube Premium 区域锁嗅探
 YT_PR_GL=""
-YT_PR_HTML=$(curl "${CURL_BIND_ARGS[@]}" "$DYNAMIC_IP_PREF" -m 12 -s -L -A "$PROBE_UA" "https://www.youtube.com/premium")
+YT_PR_HTML=$("$CURL_BIN" "${CURL_BIND_ARGS[@]}" "$DYNAMIC_IP_PREF" -m 12 -s -L --compressed -A "$PROBE_UA" "https://www.youtube.com/premium")
 if [[ "$YT_PR_HTML" == *"www.google.cn"* ]]; then
     YT_PR_GL="CN"
 else
@@ -429,7 +441,7 @@ fi
 
 # 核心 3: YouTube Music 区域锁嗅探
 YT_MU_GL=""
-YT_MU_HTML=$(curl "${CURL_BIND_ARGS[@]}" "$DYNAMIC_IP_PREF" -m 12 -s -L -A "$PROBE_UA" "https://music.youtube.com/")
+YT_MU_HTML=$("$CURL_BIN" "${CURL_BIND_ARGS[@]}" "$DYNAMIC_IP_PREF" -m 12 -s -L --compressed -A "$PROBE_UA" "https://music.youtube.com/")
 if [[ "$YT_MU_HTML" == *"www.google.cn"* ]]; then
     YT_MU_GL="CN"
 else

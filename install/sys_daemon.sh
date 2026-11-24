@@ -52,7 +52,7 @@ do_deploy_core() {
     TMP_CORE="${SECURE_TMP}/core_update"
     mkdir -p "$TMP_CORE"
 
-for c_file in "runner.sh" "updater.sh" "tg_report.sh" "agent_daemon.sh" "uninstall.sh" "mod_google.sh" "mod_trust.sh" "mod_quality.sh"; do
+for c_file in "agent_common.sh" "runner.sh" "updater.sh" "tg_report.sh" "agent_daemon.sh" "uninstall.sh" "mod_google.sh" "mod_trust.sh" "mod_quality.sh"; do
         if [ -n "$LOCAL_REPO_DIR" ] && [ -s "${LOCAL_REPO_DIR}/core/${c_file}" ]; then
             cp "${LOCAL_REPO_DIR}/core/${c_file}" "${TMP_CORE}/${c_file}"
         else

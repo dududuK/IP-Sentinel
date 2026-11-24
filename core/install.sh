@@ -76,6 +76,82 @@ version_lt() {
 # ==========================================================
 # [依赖装甲] 多分支包管理器嗅探与极简系统补全
 # ==========================================================
+# ----------------------------------------------------------
+# [传输层换皮] curl-impersonate 真实浏览器 TLS 指纹 (JA3/JA4)
+# 官方无包管理器渠道，直接拉 GitHub Release 预编译产物。
+# 全程 best-effort：下载/运行任一失败都静默回退系统 curl，
+# 绝不阻断安装主流程
+# ----------------------------------------------------------
+install_curl_impersonate() {
+    # 已有 impersonate 二进制直接跳过（幂等）
+    if compgen -c 2>/dev/null | grep -qE '^curl_(chrome|ff|safari|edge)'; then
+        echo -e "\033[32m✅ curl-impersonate 已就位，跳过安装。\033[0m"
+        return 0
+    fi
+
+    echo -e "\n[1.5/7] 正在探测 curl-impersonate 传输层组件..."
+
+    # --- 架构映射 ---
+    local asset_arch
+    case "$(uname -m)" in
+        x86_64)          asset_arch="x86_64-linux-gnu" ;;
+        aarch64|arm64)   asset_arch="aarch64-linux-gnu" ;;
+        armv7l|armv6l)   asset_arch="arm-linux-gnueabihf" ;;
+        *)
+            echo -e "\033[33m⚠️ 当前架构 $(uname -m) 无官方预编译产物，跳过（回退系统 curl）。\033[0m"
+            return 0
+            ;;
+    esac
+
+    # --- Alpine/musl 补 gcompat 兼容层（best-effort）---
+    if ldd --version 2>&1 | grep -qi musl || ls /lib/ld-musl-* >/dev/null 2>&1; then
+        apk add --no-cache gcompat libc6-compat >/dev/null 2>&1 || true
+    fi
+
+    # --- 拉取最新 Release 元数据 ---
+    local api_json tag asset_name
+    api_json=$(curl -fsSL -m 15 "https://api.github.com/repos/lwthiker/curl-impersonate/releases/latest" 2>/dev/null)
+    tag=$(printf '%s' "$api_json" | jq -r '.tag_name // empty' 2>/dev/null)
+    [ -z "$tag" ] && { echo -e "\033[33m⚠️ GitHub API 不可达，跳过 curl-impersonate（回退系统 curl）。\033[0m"; return 0; }
+
+    asset_name=$(printf '%s' "$api_json" | jq -r --arg a "$asset_arch" \
+        '.assets[].name | select(test("^curl-impersonate-.*\\." + $a + "\\.tar\\.gz$"))' 2>/dev/null | head -n1)
+    if [ -z "$asset_name" ]; then
+        echo -e "\033[33m⚠️ 未找到 ${asset_arch} 架构产物，跳过（回退系统 curl）。\033[0m"
+        return 0
+    fi
+
+    # --- 下载并解压到 /usr/local/bin ---
+    local tmp_dir
+    tmp_dir=$(mktemp -d /tmp/ci_install.XXXXXX)
+    if ! curl -fsSL -m 60 -o "${tmp_dir}/ci.tar.gz" \
+        "https://github.com/lwthiker/curl-impersonate/releases/download/${tag}/${asset_name}" 2>/dev/null; then
+        echo -e "\033[33m⚠️ curl-impersonate 下载失败，跳过（回退系统 curl）。\033[0m"
+        rm -rf "$tmp_dir"; return 0
+    fi
+
+    tar -xzf "${tmp_dir}/ci.tar.gz" -C "$tmp_dir" 2>/dev/null
+    local installed=0 f
+    for f in "${tmp_dir}"/curl_chrome* "${tmp_dir}"/curl_ff* "${tmp_dir}"/curl_safari* "${tmp_dir}"/curl_edge* "${tmp_dir}"/curl-impersonate-*; do
+        [ -f "$f" ] && [ -x "$f" ] || continue
+        if install -m 755 "$f" /usr/local/bin/ 2>/dev/null; then
+            ((installed++))
+        fi
+    done
+    rm -rf "$tmp_dir"
+
+    # --- 试运行验证（glibc/musl 兼容性终审）---
+    local probe
+    probe=$(compgen -c 2>/dev/null | grep -E '^curl_chrome' | head -n1)
+    if [ -n "$probe" ] && "$probe" --version >/dev/null 2>&1; then
+        echo -e "\033[32m✅ curl-impersonate ${tag} 安装成功 ($installed 个浏览器指纹二进制)，TLS 指纹已伪装。\033[0m"
+    else
+        # 兼容性失败则清场，避免留下哑弹
+        rm -f /usr/local/bin/curl_chrome* /usr/local/bin/curl_ff* /usr/local/bin/curl_safari* /usr/local/bin/curl_edge* /usr/local/bin/curl-impersonate-* 2>/dev/null
+        echo -e "\033[33m⚠️ curl-impersonate 二进制运行失败（libc 不兼容），已回滚，回退系统 curl。\033[0m"
+    fi
+}
+
 echo -e "\n[1/7] 正在探测并安装基础环境依赖 (curl, jq, cron, procps, python3)..."
 REQUIRED_CMDS=("curl" "jq" "crontab" "pgrep" "python3" "openssl")
 MISSING_CMDS=()
@@ -143,6 +219,8 @@ if [ ${#MISSING_CMDS[@]} -gt 0 ]; then
     done
 fi
 echo -e "\033[32m✅ 基础环境检测通过。\033[0m"
+
+install_curl_impersonate
 
 # ----------------------------------------------------------
 # [交互中枢] LBS 地理图谱树预载
@@ -953,6 +1031,7 @@ mkdir -p "${INSTALL_DIR}/data/keywords"
 TMP_CORE="${SECURE_TMP}/core_update"
 mkdir -p "$TMP_CORE"
 
+curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/core/agent_common.sh" -o "${TMP_CORE}/agent_common.sh"
 curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/core/runner.sh" -o "${TMP_CORE}/runner.sh"
 curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/core/updater.sh" -o "${TMP_CORE}/updater.sh"
 curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/core/tg_report.sh" -o "${TMP_CORE}/tg_report.sh"

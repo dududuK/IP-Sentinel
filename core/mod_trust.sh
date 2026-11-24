@@ -17,13 +17,34 @@ source "$CONFIG_FILE"
 REGION=${REGION_CODE:-"US"}
 LOG_FILE="${INSTALL_DIR}/logs/sentinel.log"
 
+# --- [日志规范化组件] (必须先于一切 log_msg 调用点定义) ---
+log_msg() {
+    local TYPE=$1
+    local MSG=$2
+    local TIME=$(date -u "+%Y-%m-%d %H:%M:%S UTC")
+    local local_ver="${AGENT_VERSION:-未知}"
+
+    printf "[%s] [v%-5s] [%-5s] [Trust  ] [%s] %s\n" \
+        "$TIME" "$local_ver" "$TYPE" "$REGION" "$MSG" | tee -a "$LOG_FILE"
+}
+
 # ==========================================================
 # 1. 动态获取配置 (拓扑自适应与兜底机制)
 # ==========================================================
-# 利用 find 穿透多级子目录，自动抓取安装时落地的专属 json 文件
-REGION_JSON_FILE=$(find "${INSTALL_DIR}/data/regions" -name "*.json" 2>/dev/null | head -n 1)
+# [共享人格库] 指纹自洽 + 区域规则坐标定位的唯一权威来源
+if [ ! -f "${INSTALL_DIR}/core/agent_common.sh" ]; then
+    echo "共享人格库缺失 (agent_common.sh)，终止执行。" >&2
+    exit 1
+fi
+# shellcheck disable=SC1091
+source "${INSTALL_DIR}/core/agent_common.sh"
 
-# [容灾兜底] 如果本地 json 异常，回退拉取云端通用大区配置
+# [v4.4.0 根因修复] 旧版 find|head -n1 会随机抓取任意城市的 json，
+# 多城市国家直接拿错白名单。现按 config 中 BASE_LAT/BASE_LON
+# 坐标在 regions/ 全库做最近邻匹配，锁定本节点专属规则文件
+REGION_JSON_FILE=$(sentinel_region_json 2>/dev/null || true)
+
+# [容灾兜底] 坐标匹配失败时回退拉取云端国家级通用配置
 if [ -z "$REGION_JSON_FILE" ] || [ ! -f "$REGION_JSON_FILE" ]; then
     REGION_JSON_FILE="${INSTALL_DIR}/data/regions/${REGION}.json"
     mkdir -p "${INSTALL_DIR}/data/regions"
@@ -45,43 +66,26 @@ if [ ${#TRUST_URLS[@]} -eq 0 ]; then
     TRUST_URLS=("https://en.wikipedia.org/wiki/Special:Random" "https://www.apple.com/" "https://www.microsoft.com/")
 fi
 
-# --- [日志规范化组件] ---
-log_msg() {
-    local TYPE=$1
-    local MSG=$2
-    local TIME=$(date -u "+%Y-%m-%d %H:%M:%S UTC")
-    local local_ver="${AGENT_VERSION:-未知}"
-
-    printf "[%s] [v%-5s] [%-5s] [Trust  ] [%s] %s\n" \
-        "$TIME" "$local_ver" "$TYPE" "$REGION" "$MSG" | tee -a "$LOG_FILE"
-}
-
 # ==========================================================
-# 2. 锁定单次会话指纹 (Hash-Seeded Persona)
+# 2. 锁定人格档案 (Persona Archive)
+# 与 mod_google 共享同一套 node 级 UA 画像，跨模块指纹一致；
+# UA/Client Hints/Accept-Language 由人格库统一派生，全自洽
 # ==========================================================
-if [ -f "$UA_FILE" ]; then
-    mapfile -t UA_POOL < <(grep -v '^$' "$UA_FILE")
-    TOTAL_UA=${#UA_POOL[@]}
-    
-    if [ "$TOTAL_UA" -gt 0 ]; then
-        # 优先使用固化的公网 IP 作为哈希种子，防范 NAT 节点指纹同质化特征
-        SEED=$(echo -n "${PUBLIC_IP:-${BIND_IP:-127.0.0.1}}" | cksum | awk '{print $1}')
-        
-        # 构建当前节点的固定设备组映射
-        IDX1=$(( SEED % TOTAL_UA ))
-        IDX2=$(( (SEED * 17) % TOTAL_UA ))
-        IDX3=$(( (SEED * 31) % TOTAL_UA ))
-        
-        MY_UA_POOL=("${UA_POOL[$IDX1]}" "${UA_POOL[$IDX2]}" "${UA_POOL[$IDX3]}")
-        
-        # 模拟真实的家庭多设备环境进行会话隔离
-        CURRENT_UA=${MY_UA_POOL[$RANDOM % 3]}
-    else
-        CURRENT_UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-    fi
-else
-    CURRENT_UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+if [ ! -f "$UA_FILE" ]; then
+    log_msg "ERROR" "UA 指纹库缺失，终止执行。"
+    exit 1
 fi
+
+sentinel_ensure_persona
+CURRENT_UA="$PERSONA_UA"
+CURL_BIN=$(sentinel_curl_bin "$PERSONA_FAMILY")
+sentinel_build_headers
+# [指纹自洽] 白名单站点多为外站，Fetch Metadata 按 none 上下文发送
+case "$PERSONA_FAMILY" in
+    chrome|edge|firefox)
+        SENT_HEADER_ARGS+=(-H "Sec-Fetch-Site: none")
+        ;;
+esac
 
 # ==========================================================
 # 3. 执行流量净化行动
@@ -97,7 +101,7 @@ log_msg "INFO " "已锁定本地伪装指纹: $(echo $CURRENT_UA | cut -d' ' -f1
 COOKIE_DIR="${INSTALL_DIR}/data/cookies"
 mkdir -p "$COOKIE_DIR"
 
-NODE_HASH=$(echo -n "${PUBLIC_IP:-127.0.0.1}" | cksum | awk '{print $1}')
+NODE_HASH=$(sentinel_node_hash)
 COOKIE_FILE="${COOKIE_DIR}/trust_${NODE_HASH}.txt"
 
 # [互斥锁] 防止并发净化导致 Cookie 文件读写冲突
@@ -143,15 +147,12 @@ SUCCESS_INJECT=0
 for ((i=1; i<=STEP_COUNT; i++)); do
     TARGET_URL=${TRUST_URLS[$((RANDOM % ${#TRUST_URLS[@]}))]}
     
-    # [v4.1.6] 统一数组化执行、挂载持久化 Cookie (-b -c) 并精准捕获底层死因
-    HTTP_CODE=$(curl "${CURL_BIND_ARGS[@]}" "$DYNAMIC_IP_PREF" \
+    # [v4.4.0] 人格库统一指纹头（Accept/Accept-Language/Client Hints 全自洽），
+    # 挂载持久化 Cookie (-b -c)，精准捕获底层死因
+    HTTP_CODE=$("$CURL_BIN" "${CURL_BIND_ARGS[@]}" "$DYNAMIC_IP_PREF" \
         -b "$COOKIE_FILE" -c "$COOKIE_FILE" -A "$CURRENT_UA" \
-        -H "Accept: text/html,application/xhtml+xml;q=0.9,image/avif,image/webp,*/*;q=0.8" \
-        -H "Accept-Language: en-US,en;q=0.9" \
-        -H "Sec-Fetch-Dest: document" \
-        -H "Sec-Fetch-Mode: navigate" \
-        -H "Upgrade-Insecure-Requests: 1" \
         --compressed \
+        "${SENT_HEADER_ARGS[@]}" \
         -s -L -o /dev/null -w "%{http_code}" -m 15 "$TARGET_URL")
     CURL_EXIT=$?
 
